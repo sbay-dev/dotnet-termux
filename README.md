@@ -68,6 +68,16 @@ dotnet run -- --mcp
 - Sensitive data (code, events, files) encrypted at rest in SQLite
 - Non-sensitive metadata (timestamps, types) stored in plaintext
 
+### 3. `copilot-termux/` — Copilot CLI Fix for Termux
+
+Fixes GitHub Copilot CLI (v1.0.60+) to run natively on Termux (Android ARM64). Solves the `Native addon "runtime" not found for android-arm64` error and all related glibc/seccomp issues.
+
+```bash
+cd copilot-termux && ./install.sh
+```
+
+**See [copilot-termux/README.md](copilot-termux/README.md) for full documentation.**
+
 ## Requirements
 
 - Termux (Android ARM64) or proot-distro Ubuntu
