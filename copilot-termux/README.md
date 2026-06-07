@@ -98,10 +98,67 @@ copilot-termux/
 ├── README.md              # هذا الملف - التوثيق الكامل
 ├── install.sh             # سكربت التثبيت الرئيسي
 ├── patch-app.sh           # ترقيع app.js لمنصة Android
+├── fix-session.sh         # إصلاح الجلسات التالفة (tokensRemoved سالب)
 └── wrapper-template.sh    # قالب wrapper script
 ```
 
 ## استكشاف الأخطاء
+
+### الخطأ: `Session file is corrupted (tokensRemoved: Number must be >= 0)`
+
+**رسالة الخطأ الكاملة:**
+```
+Error: Session '1e3b7178-...' was found but could not be loaded.
+Error: Session file is corrupted (line 89198: data.tokensRemoved: Number must be greater than or equal to 0)
+```
+
+**السبب الجذري:**
+
+Copilot CLI يُجري عملية **ضغط (compaction)** دورية على الجلسات الطويلة لتقليل استهلاك الـ tokens. العملية تسجّل حدث `session.compaction_complete` في ملف `events.jsonl` يحتوي:
+- `preCompactionTokens`: عدد الـ tokens قبل الضغط
+- `postCompactionTokens`: عدد الـ tokens بعد الضغط
+- `tokensRemoved`: الفرق بينهما (المفترض أن يكون ≥ 0)
+
+في بعض الحالات — خاصة مع الجلسات الطويلة جداً أو عند استخدام أدوات كثيرة — يحدث أن `postCompactionTokens > preCompactionTokens` (الملخص أكبر من الأصل)، فتكون النتيجة **قيمة سالبة**. هذا سلوك طبيعي من الـ compaction لكن مُخالف لقواعد التحقق (validation schema) التي تشترط `tokensRemoved >= 0`.
+
+**التأثير:**
+- الجلسة **موجودة وسليمة** لكن لا يمكن تحميلها بسبب فشل التحقق
+- البيانات **غير تالفة** فعلياً — فقط قيمة إحصائية خاطئة
+- يمكن أن يتأثر أكثر من حدث compaction في نفس الجلسة (في حالتنا: 19 حدث)
+
+**الإصلاح التلقائي:**
+```bash
+# سكربت إصلاح مضمّن
+./fix-session.sh <session-id>
+
+# مثال
+./fix-session.sh 1e3b7178-cb31-419a-a73b-1ef5f6a0c09d
+```
+
+**الإصلاح اليدوي:**
+```bash
+# 1. العثور على ملف الأحداث
+EVENTS="$HOME/.copilot/session-state/<session-id>/events.jsonl"
+
+# 2. فحص القيم السالبة
+grep -c '"tokensRemoved":-' "$EVENTS"
+
+# 3. نسخة احتياطية
+cp "$EVENTS" "${EVENTS}.bak"
+
+# 4. تصفير جميع القيم السالبة
+sed -i 's/"tokensRemoved":-[0-9]\+/"tokensRemoved":0/g' "$EVENTS"
+
+# 5. استئناف الجلسة
+copilot --resume=<session-id>
+```
+
+**لماذا التصفير آمن:**
+- `tokensRemoved` قيمة **إحصائية بحتة** تُستخدم فقط لتسجيل ما حدث
+- لا تؤثر على محتوى المحادثة أو سياقها أو سلوك النموذج
+- الضغط نفسه تمّ بنجاح — فقط القيمة المسجّلة غير صحيحة
+
+---
 
 ### الخطأ: `Native addon "runtime" not found for android-arm64`
 **السبب:** app.js غير مُرقّع
